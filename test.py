@@ -39,12 +39,13 @@ def test_predict(model, test_loader, device):
 if __name__ == '__main__':
 
     batch_size = 4096
-    device = torch.device('cpu')
+    device_ids = '0'
+    device = torch.device('cuda')
 
     # 导入模型： spend: 1020s
     now_times = time.time()
-    model = CrossDomainNet()
-    model.load_state_dict(torch.load('bast_model.pt'))
+    model = CrossDomainNet(batch_size=batch_size, device=device)
+    model.load_state_dict(torch.load('init_model.pt'))
     print("load model success - spend: {} s".format(time.time() - now_times))
 
     # 导入目标域测试集

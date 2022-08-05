@@ -136,7 +136,7 @@ def target_feature_process(data, sparse_columns, varlen_sparse_columns, labelenc
 
 
 # 构建查找表、掩码表、编码表
-def get_embedding_mask_lbe_dict(data, sparse_columns, varlen_sparse_columns):
+def get_embedding_mask_lbe_dict(data, sparse_columns, varlen_sparse_columns, device='cpu'):
 
     unique_table = data.nunique()
     # mask_dick = OrderedDict()
@@ -199,7 +199,7 @@ def get_embedding_mask_lbe_dict(data, sparse_columns, varlen_sparse_columns):
     for tensor in embedding_dict.values():
         nn.init.normal_(tensor.weight, mean=0, std=0.0001)
 
-    return embedding_dict, labelencoder_dick
+    return embedding_dict.to(device), labelencoder_dick
 
 
 # 过来源域数据中在目标域没有出现过的用户ID
@@ -237,8 +237,6 @@ def source_data_filter():
     source_train.to_csv('../ctr_data/train/train_data_feeds_drop.csv', index=False)
     source_test.to_csv('../ctr_data/test/test_data_feeds_drop.csv', index=False)
 
-
-# 根据索引信息，在对于的查找表中获取
 
 if __name__ == '__main__':
 

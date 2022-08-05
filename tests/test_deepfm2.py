@@ -13,7 +13,7 @@ from tests.feature_process import ads_dense_features, ads_sparse_features
 
 # 环境变量设置
 SEED = 1024
-os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
+os.environ['CUDA_LAUNCH_BLOCKING'] = '2'
 os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'
 torch.backends.cudnn.enable =True
 torch.backends.cudnn.benchmark = True
@@ -30,8 +30,8 @@ target = ["label"]
 # data, test = ads_dense_feature_process(dataframes=[all_data, data, test], features=ads_dense_features)
 
 # 使用新数据集
-data = pd.read_csv("utils/train_newdata_ads.csv")
-test = pd.read_csv('utils/test_newdata_ads.csv')
+data = pd.read_csv("train_newdata_ads.csv")
+test = pd.read_csv('test_newdata_ads.csv')
 all_data = pd.concat([data, test])
 
 # 统计稀疏特征的unique(需要注意，这里是要是全部值的unique)，同时记录密集特征名称
@@ -57,7 +57,7 @@ model = DeepFM(linear_feature_columns=linear_feature_columns,
                dnn_dropout=0.7,
                dnn_use_bn=True,
                dnn_hidden_units=(256, 128),
-               device='cuda:1')
+               device='cuda:2')
 model.compile(optimizer='adam',
               loss='binary_crossentropy',
               metrics=['binary_crossentropy', 'auc'])

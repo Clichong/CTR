@@ -17,7 +17,7 @@ from deepctr_torch.layers import FM, DNN
 
 class Interest_Level_Attention(nn.Module):
 
-    def __init__(self, colunms_dim_list, batch_size):
+    def __init__(self, colunms_dim_list, batch_size, device='cpu'):
         super().__init__()
 
         self.b = batch_size
@@ -26,10 +26,12 @@ class Interest_Level_Attention(nn.Module):
 
         # 最简单的做法是为每个部分赋予一个权重，但是这样就没有结合信息
         # self.interset_attention_weight = nn.Parameter(torch.ones(part_nums))
-        self.V_params = nn.ParameterList([nn.Parameter(torch.Tensor(self.colunms_dim_sum, 1))
+        self.V_params = nn.ParameterList([nn.Parameter(torch.Tensor(self.colunms_dim_sum, 1).to(device))
                                           for i in range(self.part_nums)])
-        self.g_params = nn.ParameterList([nn.Parameter(torch.Tensor(1, self.b)) for i in range(self.part_nums)])
-        self.b_params = nn.ParameterList([nn.Parameter(torch.Tensor(1)) for i in range(self.part_nums)])
+        self.g_params = nn.ParameterList([nn.Parameter(torch.Tensor(1, self.b).to(device))
+                                          for i in range(self.part_nums)])
+        self.b_params = nn.ParameterList([nn.Parameter(torch.Tensor(1).to(device))
+                                          for i in range(self.part_nums)])
 
         self.init_weight()
 
@@ -55,13 +57,13 @@ class Interest_Level_Attention(nn.Module):
 
 class PredictionLayer(nn.Module):
 
-    def __init__(self, task='sigmoid', use_bias=True, **kwargs):
+    def __init__(self, task='sigmoid', use_bias=True, device='cpu'):
 
         super(PredictionLayer, self).__init__()
         self.use_bias = use_bias
         self.task = task
         if self.use_bias:
-            self.bias = nn.Parameter(torch.zeros((1,)))
+            self.bias = nn.Parameter(torch.zeros((1,)).to(device))
 
         self.init_weight()
 
@@ -85,12 +87,12 @@ class PredictionLayer(nn.Module):
 
 class Source_Linear(nn.Module):
 
-    def __init__(self, input_dim, out_dim, activation='tanh'):
+    def __init__(self, input_dim, out_dim, activation='tanh', device='cpu'):
         super().__init__()
 
         assert activation in ['tanh', 'relu'], "No such activation choose, activation must be in ['tanh', 'relu']"
 
-        self.ln = nn.Linear(input_dim, out_dim, bias=False)
+        self.ln = nn.Linear(input_dim, out_dim, bias=False).to(device)
         if activation == 'tanh':
             self.act = nn.Tanh()
         elif activation == 'relu':
@@ -114,6 +116,7 @@ class CrossDomainNet(nn.Module):
         super().__init__()
 
         self.batch_size = batch_size
+        self.device = device
 
         # 编码长度与最长编码数量
         self.sparse_embedding_dim = sparse_embedding_dim
@@ -171,7 +174,7 @@ class CrossDomainNet(nn.Module):
 
         # 注意力层
         self.colunms_dim_list = [110, 120, 300, 80, 440]   # 各部分编码后的特征长度
-        self.interest_attention = Interest_Level_Attention(self.colunms_dim_list, self.batch_size)
+        self.interest_attention = Interest_Level_Attention(self.colunms_dim_list, self.batch_size, device=device)
 
         # 神经网络层: 通过compute_input_dim函数计算出全连接的第一层输入
         self.dnn = DNN(inputs_dim=np.array(self.colunms_dim_list).sum(),
@@ -180,7 +183,7 @@ class CrossDomainNet(nn.Module):
                        init_std=init_std, device=device)
         self.dnn_linear = nn.Linear(
             dnn_hidden_units[-1], 1, bias=False).to(device)
-        self.out = PredictionLayer(task='sigmoid')
+        self.out = PredictionLayer(task='sigmoid', device=device)
 
         # 源域单独训练的网络设置
         self.source_dnn = DNN(inputs_dim=450,
@@ -193,14 +196,14 @@ class CrossDomainNet(nn.Module):
 
         # 需要配合PredictionLayer设置，直接集成nn.Module会报错
         self.source_label_clf = nn.Linear(dnn_hidden_units[-1], 1, bias=False).to(device)
-        self.source_label_out = PredictionLayer(task='sigmoid')
+        self.source_label_out = PredictionLayer(task='sigmoid', device=device)
         self.source_cillabel_clf = nn.Linear(dnn_hidden_units[-1], 1, bias=False).to(device)
-        self.source_cillabel_out = PredictionLayer(task='sigmoid')
+        self.source_cillabel_out = PredictionLayer(task='sigmoid', device=device)
         # self.source_pro_reg = nn.Linear(dnn_hidden_units[-1], 1, bias=False).to(device)
         # self.source_pro_out = PredictionLayer(task='relu')
 
         # 添加辅助损失：regularization_loss + aux_loss
-        self.aux_loss = torch.zeros((1,))
+        self.aux_loss = torch.zeros((1,), device=device)
         self.regularization_weight = []
         self.add_regularization_weight(self.source_embedding_dict.parameters(), l2=l2_reg_embedding)
         self.add_regularization_weight(self.target_embedding_dict.parameters(), l2=l2_reg_embedding)
@@ -213,19 +216,21 @@ class CrossDomainNet(nn.Module):
         self.add_regularization_weight(self.source_cillabel_clf.weight, l2=l2_reg_dnn)
         # self.add_regularization_weight(self.source_pro_reg.weight, l2=l2_reg_dnn)
 
+        self.to(device)
+
     def forward(self, X):
 
         b = len(X)
 
         # 获取X的源域已编码数据（训练过程与预测过程需要分开，训练过程可以利用上源域的label标签）
-        unique_sampleID = np.unique(X[:, 0].detach().numpy())
+        unique_sampleID = np.unique(X[:, 0].cpu().detach().numpy())
         if self.training:
             source_supple_batchdata = self.source_train_dataframe[self.source_train_dataframe[0].isin(unique_sampleID)]
         else:
             source_supple_batchdata = self.source_test_dataframe[self.source_test_dataframe[0].isin(unique_sampleID)]
 
         # 源域的标签信息
-        aux_label = torch.tensor(source_supple_batchdata.values[:, -3:]).float()
+        aux_label = torch.tensor(source_supple_batchdata.values[:, -3:], device=self.device).float()
         # source_label = source_supple_batchdata.values[:, -3]
         # source_clilabel = torch.tensor(source_supple_batchdata.values[:, -2])
         # source_pro = torch.tensor(source_supple_batchdata.values[:, -1])
@@ -290,7 +295,7 @@ class CrossDomainNet(nn.Module):
         id_embedding_dict = OrderedDict()
 
         # 传入的source_raw_data是一个dataframe格式
-        source_raw_data = torch.tensor(source_raw_data.values)
+        source_raw_data = torch.tensor(source_raw_data.values, device=self.device)
 
         # 构建一个ID索引编码字典
         for id in unique_ID:
@@ -315,7 +320,7 @@ class CrossDomainNet(nn.Module):
     def get_source_embedding_batchdata(self, batchdata):
 
         batchdata_len = len(batchdata)
-        batchdata = torch.tensor(batchdata.values)
+        batchdata = torch.tensor(batchdata.values, device=self.device)
 
         # 首先根据一个批次在dataframe筛选出来的数据获取其变长特征的掩码
         batchdata_mask_dict = self.get_mask_dick(batchdata, self.source_varlen_sparse_colunms,
@@ -353,7 +358,7 @@ class CrossDomainNet(nn.Module):
         # Returns a mask tensor representing the first N positions of each cell.
         if maxlen is None:
             maxlen = lengths.max()
-        row_vector = torch.arange(0, maxlen, 1).to(lengths.device)
+        row_vector = torch.arange(0, maxlen, 1).to(self.device)
         matrix = torch.unsqueeze(lengths, dim=-1)
         mask = row_vector < matrix
         mask.type(dtype)
@@ -441,7 +446,7 @@ class CrossDomainNet(nn.Module):
         self.regularization_weight.append((weight_list, l1, l2))
 
     def get_regularization_loss(self):
-        total_reg_loss = torch.zeros((1,))
+        total_reg_loss = torch.zeros((1,), device=self.device)
         for weight_list, l1, l2 in self.regularization_weight:
             for w in weight_list:
                 if isinstance(w, tuple):

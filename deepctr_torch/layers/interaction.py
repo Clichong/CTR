@@ -26,6 +26,7 @@ class FM(nn.Module):
     def forward(self, inputs):
         fm_input = inputs
 
+        # [b, 27, 8] -> [b, 1, 8] -> [b, 1]
         square_of_sum = torch.pow(torch.sum(fm_input, dim=1, keepdim=True), 2)
         sum_of_square = torch.sum(fm_input * fm_input, dim=1, keepdim=True)
         cross_term = square_of_sum - sum_of_square

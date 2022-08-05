@@ -4,6 +4,7 @@ import torch.nn.functional as F
 import torch.utils.data as Data
 from torch.utils.data import DataLoader
 
+import os
 import pandas as pd
 import numpy as np
 from sklearn.metrics import *
@@ -13,12 +14,7 @@ from model import CrossDomainNet
 from utils.feature_deal import target_feature_process, source_feature_process,  \
     target_sparse_feature_names, target_varlen_sparse_feature_names
 
-
-# 对目标域的数据添加源域数据函数 （待补充）
-# 思路：训练阶段，动态根据user的用户ID来补充对应池化后的源域数据
-# def target_add_source_data(x):
-#     return x
-
+# 定义一个全部变量
 best_auc = 0
 
 # 进行一次训练的代码
@@ -48,7 +44,7 @@ def train_one_epoch(epoch, model, criterion, optimizer, train_loader, metrics, d
         # 总损失为: 交叉熵损失 + 正则化损失 + 辅助损失
         # y_pred = model(x).squeeze()
         y_pred, aux_pred, aux_label = model(x)
-        y_pred = y_pred.squeeze()
+        y_pred = y_pred.squeeze()   # y_pred: [b, 1]
 
         optimizer.zero_grad()
 
@@ -82,12 +78,12 @@ def train_one_epoch(epoch, model, criterion, optimizer, train_loader, metrics, d
         total_loss.backward()
         optimizer.step()
 
-        # print time = 5
-        # if batch_idx % (steps_per_epoch // 5) == 0 or batch_idx == steps_per_epoch - 1:
-        train_info = "epoch:{}, batch:{}/{}, loss:{}, aux_loss:{}, total_loss:{}" \
-            .format(epoch + 1, batch_idx, steps_per_epoch,
-                    loss_epoch / (batch_idx + 1), aux_loss_epoch / (batch_idx + 1), total_loss_epoch / (batch_idx + 1))
-        print(train_info)
+        # print time = 300
+        if batch_idx % (steps_per_epoch // 300) == 0 or batch_idx == steps_per_epoch - 1:
+            train_info = "epoch:{}, batch:{}/{}, loss:{}, aux_loss:{}, total_loss:{}" \
+                .format(epoch + 1, batch_idx, steps_per_epoch,
+                        loss_epoch / (batch_idx + 1), aux_loss_epoch / (batch_idx + 1), total_loss_epoch / (batch_idx + 1))
+            print(train_info)
 
         if verbose > 0:
             # 遍历每种评价指标
@@ -125,11 +121,15 @@ def eval_one_epoch(epoch, model, val_loader, device):
         for batch_idx, (x_val, y_val) in enumerate(val_loader):
 
             x = x_val.to(device).float()
-            y = y_val.to(device).float()
+            # y = y_val.to(device).float()
 
+            # y_pred: [b, 1]
             y_pred, _, _ = model(x)  # .squeeze()
 
+            # 格式转换
             y_pred = y_pred.cpu().data.numpy()
+            y = y_val.float().numpy()
+
             pred_ans.append(y_pred)
             true_ans.append(y)
 
@@ -176,14 +176,19 @@ if __name__ == '__main__':
     epoch_size = 5
     batch_size = 4096
     SEED = 1024
+    device_ids = '0'
     metrics = ['binary_crossentropy', 'auc']
-    device = torch.device('cpu')
+
+    device = torch.device('cuda')
 
     # 后续操作可能会使用到模型的一些内置变量
-    model = CrossDomainNet(batch_size=batch_size)
+    os.environ["CUDA_VISIBLE_DEVICES"] = device_ids
+    model = CrossDomainNet(batch_size=batch_size, device=device)
+    # model = torch.nn.DataParallel(model)
     torch.save(model.state_dict(), 'init_model.pt')
 
     data = pd.read_csv("ctr_data/train/train_data_ads.csv")
+
     # 获取标签数据
     y = data['label'].values
     # 获取训练数据（这里需要先编码 -> 再拼接，形成一个矩阵）
@@ -220,8 +225,8 @@ if __name__ == '__main__':
 
     print('Start training...')
     for epoch in range(epoch_size):
-        eval_one_epoch(epoch, model, val_loader, device)
         train_one_epoch(epoch, model, criterion, optimizer, train_loader, metrics, device)
+        eval_one_epoch(epoch, model, val_loader, device)
 
     # 训练结束后保存模型
     torch.save(model.state_dict(), 'last_model.pt')
